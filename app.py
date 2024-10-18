@@ -21,8 +21,8 @@ def extract_text_from_url(url):
         st.error(f"Error occurred while extracting from {url}: {str(e)}")
         return ""
 
-# 내부 링크 추출 함수
-def extract_internal_links(url, base_url):
+# 내부 링크 추출 함수 (재귀적으로 페이지를 탐색)
+def extract_internal_links(url, base_url, depth=1):
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -33,10 +33,16 @@ def extract_internal_links(url, base_url):
             href = link.get('href')
             full_url = urljoin(base_url, href)
             
-            # 내부 링크만 처리 (도메인이 같은 링크)
+            # 내부 링크만 처리 (도메인이 같은 링크) 및 중복 제거
             if urlparse(full_url).netloc == urlparse(base_url).netloc:
-                internal_links.append(full_url)
+                if full_url not in internal_links:
+                    internal_links.append(full_url)
         
+        # 깊이 설정에 따른 재귀 탐색
+        if depth > 1:
+            for link in internal_links:
+                internal_links.extend(extract_internal_links(link, base_url, depth - 1))
+
         return list(set(internal_links))  # 중복 제거
     except Exception as e:
         st.error(f"Error occurred while extracting links from {url}: {str(e)}")
@@ -60,11 +66,11 @@ def save_text_to_pdf(text, pdf_filename):
     pdf.output(pdf_filename)
 
 # 주 함수: 사이트 내 링크를 크롤링하고, 모든 데이터를 PDF로 저장
-def create_pdf_from_site(base_url, pdf_filename):
-    st.write(f"Starting extraction from {base_url}...")
-    
-    # 1. 메인 페이지에서 모든 내부 링크 추출
-    all_links = extract_internal_links(base_url, base_url)
+def create_pdf_from_site(base_url, pdf_filename, depth=1):
+    st.write(f"Starting extraction from {base_url} with depth {depth}...")
+
+    # 1. 메인 페이지에서 모든 내부 링크 추출 (깊이 설정 추가)
+    all_links = extract_internal_links(base_url, base_url, depth)
 
     all_text = ""
     
@@ -81,15 +87,16 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Website to PDF Converter")
+    st.title("Website to PDF Converter with Depth")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
+    depth = st.slider("Select the depth for crawling:", min_value=1, max_value=5, value=1)
 
     if st.button("Create PDF"):
         if url_input:
             pdf_filename = "site_output.pdf"
-            create_pdf_from_site(url_input, pdf_filename)
+            create_pdf_from_site(url_input, pdf_filename, depth)
             # PDF 다운로드 링크 제공
             with open(pdf_filename, "rb") as pdf_file:
                 st.download_button(
