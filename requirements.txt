@@ -1,0 +1,1 @@
+pip install streamlit beautifulsoup4 requests fpdf
