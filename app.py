@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from fpdf import FPDF
 import streamlit as st
+import os
 
 # URL에서 데이터를 가져와 텍스트를 추출하는 함수
 def extract_text_from_url(url):
@@ -47,8 +48,9 @@ def save_text_to_pdf(text, pdf_filename):
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # 유니코드 지원 폰트 추가
-    pdf.add_font('NotoSans', '', 'NotoSans-Regular.ttf', uni=True)
+    # 유니코드 지원 폰트 추가 (GitHub에서 폰트 파일을 찾을 수 있도록 상대 경로로 설정)
+    font_path = os.path.join(os.getcwd(), 'fonts', 'NotoSans-Regular.ttf')
+    pdf.add_font('NotoSans', '', font_path, uni=True)
     pdf.set_font('NotoSans', size=12)
 
     # 텍스트를 PDF로 작성
