@@ -5,21 +5,47 @@ from fpdf import FPDF
 import streamlit as st
 import os
 
-# URL에서 데이터를 가져와 텍스트를 추출하는 함수
-def extract_text_from_url(url):
+# 이미지 다운로드 함수
+def download_image(img_url, folder="images"):
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+    img_name = os.path.join(folder, img_url.split("/")[-1])
+    try:
+        img_data = requests.get(img_url).content
+        with open(img_name, 'wb') as handler:
+            handler.write(img_data)
+        return img_name
+    except Exception as e:
+        st.error(f"Error occurred while downloading image {img_url}: {str(e)}")
+        return None
+
+# URL에서 데이터를 가져와 텍스트와 이미지를 추출하는 함수
+def extract_content_from_url(url, base_url):
     try:
         response = requests.get(url)
-        response.raise_for_status()  # 요청 오류가 있으면 예외 발생
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # 기본적으로 <p> 태그의 텍스트를 모두 가져온다.
+        # 1. 텍스트 추출
         paragraphs = soup.find_all('p')
         text_content = "\n\n".join([p.get_text() for p in paragraphs])
 
-        return text_content
+        # 2. 이미지 링크 추출 및 다운로드
+        images = soup.find_all('img')
+        img_paths = []
+        for img in images:
+            img_src = img.get('src')
+            if img_src:
+                img_url = urljoin(base_url, img_src)
+                img_path = download_image(img_url)
+                if img_path:
+                    img_paths.append(img_path)
+
+        return text_content, img_paths
     except Exception as e:
-        st.error(f"Error occurred while extracting from {url}: {str(e)}")
-        return ""
+        st.error(f"Error occurred while extracting content from {url}: {str(e)}")
+        return "", []
 
 # 내부 링크 추출 함수 (재귀적으로 페이지를 탐색)
 def extract_internal_links(url, base_url, depth=1):
@@ -48,24 +74,32 @@ def extract_internal_links(url, base_url, depth=1):
         st.error(f"Error occurred while extracting links from {url}: {str(e)}")
         return []
 
-# PDF로 텍스트 저장 함수 (유니코드 지원)
-def save_text_to_pdf(text, pdf_filename):
+# PDF로 텍스트와 이미지를 저장하는 함수 (유니코드 지원)
+def save_content_to_pdf(text, img_paths, pdf_filename):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # 유니코드 지원 폰트 추가 (GitHub에서 폰트 파일을 찾을 수 있도록 상대 경로로 설정)
+    # 유니코드 지원 폰트 추가
     font_path = os.path.join(os.getcwd(), 'fonts', 'NotoSans-Regular.ttf')
     pdf.add_font('NotoSans', '', font_path, uni=True)
     pdf.set_font('NotoSans', size=12)
 
-    # 텍스트를 PDF로 작성
+    # 텍스트 추가
     pdf.multi_cell(0, 10, text)
+
+    # 이미지 추가
+    for img_path in img_paths:
+        try:
+            pdf.add_page()
+            pdf.image(img_path, x=10, y=10, w=pdf.w - 20)  # 이미지 추가 (페이지 중앙 배치)
+        except Exception as e:
+            st.error(f"Error occurred while adding image {img_path} to PDF: {str(e)}")
 
     # PDF 저장
     pdf.output(pdf_filename)
 
-# 주 함수: 사이트 내 링크를 크롤링하고, 모든 데이터를 PDF로 저장
+# 주 함수: 사이트 내 링크를 크롤링하고, 텍스트와 이미지를 PDF로 저장
 def create_pdf_from_site(base_url, pdf_filename, depth=1):
     st.write(f"Starting extraction from {base_url} with depth {depth}...")
 
@@ -73,21 +107,22 @@ def create_pdf_from_site(base_url, pdf_filename, depth=1):
     all_links = extract_internal_links(base_url, base_url, depth)
 
     all_text = ""
+    all_images = []
     
-    # 2. 각 링크에서 텍스트 추출
+    # 2. 각 링크에서 텍스트 및 이미지 추출
     for link in all_links:
         st.write(f"Extracting from {link}...")
-        text = extract_text_from_url(link)
-        if text:
-            all_text += text + "\n\n" + ("-" * 50) + "\n\n"
+        text, img_paths = extract_content_from_url(link, base_url)
+        all_text += text + "\n\n" + ("-" * 50) + "\n\n"
+        all_images.extend(img_paths)
 
-    # 3. 텍스트를 PDF로 저장
-    save_text_to_pdf(all_text, pdf_filename)
+    # 3. 텍스트와 이미지를 PDF로 저장
+    save_content_to_pdf(all_text, all_images, pdf_filename)
     st.success(f"PDF saved as {pdf_filename}")
 
 # Streamlit UI
 def main():
-    st.title("Website to PDF Converter with Depth")
+    st.title("Website to PDF Converter with Images and Depth")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
