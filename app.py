@@ -18,18 +18,14 @@ def create_pdf(content, filename='output.pdf'):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_font('Arial', '', '', uni=True)  
-   
-    # 유니코드 폰트 추가
+    pdf.add_font('Arial', '', 'path/to/arial.ttf', uni=True)  # TTF 폰트 경로 추가
     pdf.set_font('Arial', '', 12)
-    
+
     for line in content.split('\n'):
         try:
-            pdf.cell(200, 10, txt=line.encode('latin-1', 'replace').decode('latin-1'), ln=True)
+            pdf.cell(200, 10, txt=line, ln=True)
         except:
-            pdf.cell(200, 10, txt=line, ln=True)  
-          
-    # 기본 유니코드로 처리
+            pdf.cell(200, 10, txt=line.encode('latin-1', 'replace').decode('latin-1'), ln=True)
 
     pdf.output(filename)
     return filename
