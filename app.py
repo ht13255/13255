@@ -18,7 +18,9 @@ def create_pdf(content, filename='output.pdf'):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_font('Arial', '', 'path/to/arial.ttf', uni=True)  # TTF 폰트 경로 추가
+    pdf.add_font('Arial', '', 'assets/fonts/arial.ttf', uni=True)  
+    
+    # TTF 폰트 경로 추가
     pdf.set_font('Arial', '', 12)
 
     for line in content.split('\n'):
