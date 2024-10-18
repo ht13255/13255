@@ -41,15 +41,20 @@ def extract_internal_links(url, base_url):
         st.error(f"Error occurred while extracting links from {url}: {str(e)}")
         return []
 
-# PDF로 텍스트 저장 함수
+# PDF로 텍스트 저장 함수 (유니코드 지원)
 def save_text_to_pdf(text, pdf_filename):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    pdf.set_font("Arial", size=12)
+    # 유니코드 지원 폰트 추가
+    pdf.add_font('NotoSans', '', 'NotoSans-Regular.ttf', uni=True)
+    pdf.set_font('NotoSans', size=12)
+
+    # 텍스트를 PDF로 작성
     pdf.multi_cell(0, 10, text)
 
+    # PDF 저장
     pdf.output(pdf_filename)
 
 # 주 함수: 사이트 내 링크를 크롤링하고, 모든 데이터를 PDF로 저장
