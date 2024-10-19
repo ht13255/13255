@@ -16,15 +16,17 @@ def extract_text_from_url(url, session):
     }
     
     try:
-        # 첫 번째 시도: <p> 태그에서 텍스트 추출
+        # 페이지에서 텍스트 추출
         response = session.get(url, headers=headers, allow_redirects=True)
-        response.raise_for_status()  # 404, 403 등의 HTTP 오류가 발생할 경우 예외 발생
+        response.raise_for_status()  # HTTP 오류가 발생하면 예외 발생
         soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 기본적으로 <p> 태그의 텍스트를 모두 가져온다.
         paragraphs = soup.find_all('p')
         if paragraphs:
             return "\n\n".join([p.get_text() for p in paragraphs])
 
-        # 두 번째 시도: <div>, <span> 태그에서 텍스트 추출
+        # <div>, <span> 등의 태그에서도 텍스트를 추출
         divs = soup.find_all('div')
         spans = soup.find_all('span')
         if divs or spans:
@@ -37,79 +39,46 @@ def extract_text_from_url(url, session):
         st.error(f"Error in standard extraction for {url}: {str(e)}")
         return ""
 
-    # 세 번째 시도: Selenium을 사용하여 동적 페이지에서 텍스트 추출
+# 내부 링크를 탐색하고 순차적으로 페이지에 방문 후 돌아와서 다음 링크 크롤링
+def crawl_and_return(base_url, session):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
     try:
-        return extract_text_with_selenium(url)
-    except Exception as e:
-        st.error(f"Failed to extract content from {url} using all methods.")
-        return ""
-
-# Selenium을 사용한 동적 콘텐츠 크롤링 함수
-def extract_text_with_selenium(url):
-    try:
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--disable-gpu")
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-
-        driver.get(url)
-
-        html = driver.page_source
-        soup = BeautifulSoup(html, 'html.parser')
-
-        # 다시 <p> 태그, <div> 태그, <span> 태그에서 텍스트 추출
-        paragraphs = soup.find_all('p')
-        divs = soup.find_all('div')
-        spans = soup.find_all('span')
-
-        text_content = "\n\n".join([p.get_text() for p in paragraphs] +
-                                   [d.get_text() for d in divs] +
-                                   [s.get_text() for s in spans])
-
-        driver.quit()
-        return text_content
-    except Exception as e:
-        st.error(f"Selenium extraction failed for {url}: {str(e)}")
-        return ""
-
-# 내부 링크를 재귀적으로 탐색하고 모든 페이지의 텍스트를 크롤링하는 함수
-def crawl_all_links(base_url, current_url, visited, session):
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = session.get(current_url, headers=headers, allow_redirects=True)
-        response.raise_for_status()  # 404, 403 등의 HTTP 오류가 발생할 경우 예외 발생
+        # 메인 페이지에서 모든 링크를 추출
+        response = session.get(base_url, headers=headers, allow_redirects=True)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # 현재 페이지에서 내부 링크를 추출
+        # 내부 링크만 추출
         internal_links = []
         for link in soup.find_all('a', href=True):
             href = link.get('href')
             full_url = urljoin(base_url, href)
 
-            # 내부 링크만 추가, 외부 링크나 중복 링크는 제외
-            if urlparse(full_url).netloc == urlparse(base_url).netloc and full_url not in visited:
+            # 내부 링크만 추가
+            if urlparse(full_url).netloc == urlparse(base_url).netloc:
                 internal_links.append(full_url)
 
-        # 방문한 링크 목록에 현재 링크 추가
-        visited.add(current_url)
+        # 중복 제거
+        internal_links = list(set(internal_links))
 
-        # 현재 페이지의 텍스트 추출
-        text = extract_text_from_url(current_url, session)
+        # 순차적으로 링크를 방문하여 크롤링
+        all_text = ""
+        for idx, link in enumerate(internal_links):
+            st.write(f"Visiting {link} ({idx + 1}/{len(internal_links)})...")
+            text = extract_text_from_url(link, session)
+            if text:
+                all_text += text + "\n\n" + ("-" * 50) + "\n\n"
 
-        # 재귀적으로 모든 내부 링크를 탐색하고 텍스트를 수집
-        for link in internal_links:
-            if link not in visited:
-                text += "\n\n" + ("-" * 50) + "\n\n"
-                text += crawl_all_links(base_url, link, visited, session)
+        return all_text
 
-        return text
     except requests.exceptions.HTTPError as http_err:
-        st.error(f"HTTP error occurred while crawling {current_url}: {str(http_err)}")
+        st.error(f"HTTP error occurred while accessing {base_url}: {str(http_err)}")
         return ""
     except Exception as e:
-        st.error(f"Error occurred while crawling {current_url}: {str(e)}")
+        st.error(f"Error occurred while crawling {base_url}: {str(e)}")
         return ""
 
 # PDF로 텍스트 저장 함수 (유니코드 지원)
@@ -129,26 +98,26 @@ def save_text_to_pdf(text, pdf_filename):
     # PDF 저장
     pdf.output(pdf_filename)
 
-# 주 함수: 사이트 내 모든 링크를 재귀적으로 크롤링하고, 모든 데이터를 PDF로 저장
+# 주 함수: 사이트 내 모든 링크를 순차적으로 크롤링하고, 모든 데이터를 PDF로 저장
 def create_pdf_from_site(base_url, pdf_filename):
-    st.write(f"Starting full site crawl from {base_url}...")
-
-    # 방문한 URL을 저장하는 집합(set)
-    visited = set()
+    st.write(f"Starting site crawl from {base_url}...")
 
     # 세션을 사용하여 모든 페이지를 크롤링
     session = requests.Session()
 
-    # 메인 URL부터 시작하여 모든 내부 페이지를 크롤링
-    all_text = crawl_all_links(base_url, base_url, visited, session)
+    # 사이트 내 모든 링크를 방문하고 돌아오면서 텍스트를 수집
+    all_text = crawl_and_return(base_url, session)
 
     # 텍스트를 PDF로 저장
-    save_text_to_pdf(all_text, pdf_filename)
-    st.success(f"PDF saved as {pdf_filename}")
+    if all_text:
+        save_text_to_pdf(all_text, pdf_filename)
+        st.success(f"PDF saved as {pdf_filename}")
+    else:
+        st.error("No content to save.")
 
 # Streamlit UI
 def main():
-    st.title("Full Website to PDF Converter (with Error Handling)")
+    st.title("Sequential Website Crawler to PDF Converter")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
@@ -170,4 +139,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
