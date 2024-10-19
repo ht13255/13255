@@ -5,6 +5,8 @@ from fpdf import FPDF
 import streamlit as st
 import os
 import logging
+from PIL import Image
+from io import BytesIO
 
 # 로그 파일 설정
 logging.basicConfig(filename='error_log.txt', level=logging.ERROR, 
@@ -15,7 +17,7 @@ def is_valid_image_url(url):
     valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
     return url.lower().endswith(valid_extensions)
 
-# 이미지 다운로드 함수 (캐시 추가)
+# 이미지 다운로드 함수 (캐시 추가 및 차단된 이미지 처리)
 def download_image(url, folder, downloaded_images):
     try:
         # 이미지 URL이 유효한지 확인
@@ -31,8 +33,16 @@ def download_image(url, folder, downloaded_images):
         if not os.path.exists(folder):
             os.makedirs(folder)
 
-        response = requests.get(url)
-        response.raise_for_status()
+        # 기본 헤더로 이미지 다운로드 시도
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+        except requests.exceptions.RequestException:
+            # 기본 요청 실패 시 사용자 에이전트를 추가한 헤더로 재시도
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
 
         # 이미지 파일 이름 추출
         image_name = os.path.join(folder, url.split("/")[-1])
@@ -45,10 +55,11 @@ def download_image(url, folder, downloaded_images):
         downloaded_images[url] = image_name
 
         return image_name
+
     except Exception as e:
-        error_message = f"Error occurred while downloading image {url}: {str(e)}"
+        error_message = f"Error downloading image {url}: {str(e)}"
         st.error(error_message)
-        logging.error(error_message)  # 오류를 로그 파일에 기록
+        logging.error(error_message)
         return None
 
 # URL에서 데이터를 가져와 텍스트를 추출하는 함수
@@ -111,8 +122,8 @@ def extract_internal_links_and_images(url, base_url, depth=1, images_folder="ima
         logging.error(error_message)  # 오류를 로그 파일에 기록
         return [], []
 
-# PDF로 텍스트 저장 함수 (유니코드 지원)
-def save_text_to_pdf(text, pdf_filename):
+# PDF로 텍스트와 이미지를 저장하는 함수
+def save_text_and_images_to_pdf(text, image_paths, pdf_filename):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -124,6 +135,16 @@ def save_text_to_pdf(text, pdf_filename):
 
     # 텍스트를 PDF로 작성
     pdf.multi_cell(0, 10, text)
+
+    # 이미지를 PDF에 추가
+    for image_path in image_paths:
+        try:
+            pdf.add_page()
+            pdf.image(image_path, x=10, y=10, w=pdf.w - 20)  # 이미지 크기 조정
+        except Exception as e:
+            error_message = f"Failed to add image {image_path} to PDF: {str(e)}"
+            st.error(error_message)
+            logging.error(error_message)
 
     # PDF 저장
     pdf.output(pdf_filename)
@@ -145,13 +166,13 @@ def create_pdf_from_site(base_url, pdf_filename, depth=1):
         if text:
             all_text += text + "\n\n" + ("-" * 50) + "\n\n"
 
-    # 3. 텍스트를 PDF로 저장
-    save_text_to_pdf(all_text, pdf_filename)
+    # 3. 텍스트와 이미지를 PDF로 저장
+    save_text_and_images_to_pdf(all_text, list(downloaded_images.values()), pdf_filename)
     st.success(f"PDF saved as {pdf_filename}")
 
 # Streamlit UI
 def main():
-    st.title("Website to PDF Converter with Image Support and Logging")
+    st.title("Website to PDF Converter with Image Support and Header Bypass")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
