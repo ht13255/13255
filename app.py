@@ -46,13 +46,20 @@ def extract_text_from_url(url, session):
         st.error(f"Error in standard extraction for {url}: {str(e)}")
         return ""
 
-# 광고 링크 및 외부 링크 필터링
+# 광고 링크 및 외부 링크, 비정상적인 링크 필터링
 def is_valid_link(href, base_url):
     # 광고 링크 패턴 정의 (여기에 패턴을 추가할 수 있음)
     ad_keywords = ['utm_source', 'affiliate', 'ad', 'advert', 'click']
+
+    # 필터링할 URL 스킴 (mailto:, tel:, javascript:)
+    invalid_schemes = ['mailto:', 'tel:', 'javascript:']
     
     # 광고 링크 패턴에 맞는지 확인
     if any(keyword in href for keyword in ad_keywords):
+        return False
+
+    # 특정 스킴을 가진 링크 필터링
+    if any(href.startswith(scheme) for scheme in invalid_schemes):
         return False
 
     # 외부 사이트 링크인지 확인
@@ -102,7 +109,7 @@ def crawl_and_collect_all_pages(base_url, session):
                 href = link.get('href')
                 full_url = urljoin(base_url, href)
 
-                # 광고 및 외부 링크 필터링
+                # 광고 및 외부 링크, 비정상 링크 필터링
                 if full_url not in visited and full_url not in to_visit and is_valid_link(full_url, base_url):
                     to_visit.append(full_url)
 
