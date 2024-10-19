@@ -4,27 +4,84 @@ from urllib.parse import urljoin, urlparse
 from fpdf import FPDF
 import streamlit as st
 import os
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
-# URL에서 데이터를 가져와 텍스트를 추출하는 함수
-def extract_text_from_url(url):
+# 세션을 사용하여 크롤링하는 함수
+def extract_text_from_url(url, session):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # 요청 오류가 있으면 예외 발생
+        # 첫 번째 시도: <p> 태그에서 텍스트 추출
+        response = session.get(url, headers=headers)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-
-        # 기본적으로 <p> 태그의 텍스트를 모두 가져온다.
         paragraphs = soup.find_all('p')
-        text_content = "\n\n".join([p.get_text() for p in paragraphs])
+        if paragraphs:
+            return "\n\n".join([p.get_text() for p in paragraphs])
 
+        # 두 번째 시도: <div>, <span> 태그에서 텍스트 추출
+        divs = soup.find_all('div')
+        spans = soup.find_all('span')
+        if divs or spans:
+            return "\n\n".join([d.get_text() for d in divs] + [s.get_text() for s in spans])
+
+    except Exception as e:
+        st.error(f"Error in standard extraction for {url}: {str(e)}")
+
+    # 세 번째 시도: Selenium을 사용하여 동적 페이지에서 텍스트 추출
+    try:
+        return extract_text_with_selenium(url)
+    except Exception as e:
+        st.error(f"Failed to extract content from {url} using all methods.")
+        return ""
+
+# Selenium을 사용한 동적 콘텐츠 크롤링 함수
+def extract_text_with_selenium(url):
+    try:
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-gpu")
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+        driver.get(url)
+        
+        # 쿠키를 자동으로 받아 처리
+        driver.add_cookie({
+            'name': 'your_cookie_name',
+            'value': 'your_cookie_value',
+            'domain': 'your_website.com'
+        })
+
+        html = driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
+
+        # 다시 <p> 태그, <div> 태그, <span> 태그에서 텍스트 추출
+        paragraphs = soup.find_all('p')
+        divs = soup.find_all('div')
+        spans = soup.find_all('span')
+
+        text_content = "\n\n".join([p.get_text() for p in paragraphs] +
+                                   [d.get_text() for d in divs] +
+                                   [s.get_text() for s in spans])
+
+        driver.quit()
         return text_content
     except Exception as e:
-        st.error(f"Error occurred while extracting from {url}: {str(e)}")
+        st.error(f"Selenium extraction failed for {url}: {str(e)}")
         return ""
 
 # 내부 링크를 재귀적으로 탐색하고 모든 페이지의 텍스트를 크롤링하는 함수
-def crawl_all_links(base_url, current_url, visited):
+def crawl_all_links(base_url, current_url, visited, session):
     try:
-        response = requests.get(current_url)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = session.get(current_url, headers=headers)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -42,13 +99,13 @@ def crawl_all_links(base_url, current_url, visited):
         visited.add(current_url)
 
         # 현재 페이지의 텍스트 추출
-        text = extract_text_from_url(current_url)
+        text = extract_text_from_url(current_url, session)
 
         # 재귀적으로 모든 내부 링크를 탐색하고 텍스트를 수집
         for link in internal_links:
             if link not in visited:
                 text += "\n\n" + ("-" * 50) + "\n\n"
-                text += crawl_all_links(base_url, link, visited)
+                text += crawl_all_links(base_url, link, visited, session)
 
         return text
     except Exception as e:
@@ -79,8 +136,11 @@ def create_pdf_from_site(base_url, pdf_filename):
     # 방문한 URL을 저장하는 집합(set)
     visited = set()
 
+    # 세션을 사용하여 모든 페이지를 크롤링
+    session = requests.Session()
+
     # 메인 URL부터 시작하여 모든 내부 페이지를 크롤링
-    all_text = crawl_all_links(base_url, base_url, visited)
+    all_text = crawl_all_links(base_url, base_url, visited, session)
 
     # 텍스트를 PDF로 저장
     save_text_to_pdf(all_text, pdf_filename)
@@ -88,7 +148,7 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Full Website to PDF Converter")
+    st.title("Full Website to PDF Converter (with Cookie Handling)")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
