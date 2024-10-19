@@ -1,38 +1,37 @@
+import time
+import os
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from fpdf import FPDF
 import streamlit as st
-import os
-import time
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
-# 요청을 재시도하는 함수 (최대 3회) + 쿠키 자동 관리
-def make_request_with_retry(session, url, headers, retries=3):
-    for attempt in range(retries):
-        try:
-            response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
-            response.raise_for_status()
-            return response
-        except requests.exceptions.RequestException as e:
-            st.error(f"Attempt {attempt+1} failed for {url}: {e}")
-            time.sleep(2)  # 2초 대기 후 재시도
-    return None  # 3회 실패 시 None 반환
+# Selenium으로 페이지 로드 및 동적 콘텐츠 처리
+def load_dynamic_page(url):
+    options = Options()
+    options.add_argument("--headless")  # GUI 없이 실행
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
 
-# 세션을 사용하여 크롤링하는 함수 (타임아웃과 리트라이 횟수 포함)
-def extract_text_from_url(url, session):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': url,
-    }
+    # ChromeDriver 설치 및 사용
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    driver.get(url)
+    time.sleep(3)  # JavaScript가 로드될 시간을 주기 위해 대기 (필요시 조정 가능)
 
-    response = make_request_with_retry(session, url, headers)
-    if response is None:
-        st.warning(f"Failed to crawl {url} after 3 attempts. Skipping...")
-        return ""  # 요청이 실패한 경우 빈 텍스트 반환
+    page_source = driver.page_source
+    driver.quit()  # 크롤링 후 드라이버 종료
+    return page_source
 
+# 페이지에서 텍스트를 추출하는 함수 (Selenium으로 동적 로드 처리)
+def extract_text_from_dynamic_url(url):
     try:
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # 동적 페이지 로딩
+        page_source = load_dynamic_page(url)
+        soup = BeautifulSoup(page_source, 'html.parser')
 
         # 기본적으로 <p> 태그의 텍스트를 모두 가져온다.
         paragraphs = soup.find_all('p')
@@ -46,7 +45,7 @@ def extract_text_from_url(url, session):
             return "\n\n".join([d.get_text() for d in divs] + [s.get_text() for s in spans])
 
     except Exception as e:
-        st.error(f"Error in standard extraction for {url}: {str(e)}")
+        st.error(f"Error in extracting text from {url}: {str(e)}")
         return ""
 
 # 광고 링크 및 외부 링크, 비정상적인 링크 필터링
@@ -63,21 +62,17 @@ def is_valid_link(href, base_url):
     if any(href.startswith(scheme) for scheme in invalid_schemes):
         return False
 
+    # 외부 사이트 링크인지 확인
+    parsed_href = urlparse(href)
+    base_domain = urlparse(base_url).netloc
+
+    if parsed_href.netloc and parsed_href.netloc != base_domain:
+        return False
+
     return True
 
-# 특수 링크 처리 (mailto, tel, javascript)
-def handle_special_links(href):
-    if href.startswith('mailto:'):
-        return f"Email Link: {href}"
-    elif href.startswith('tel:'):
-        return f"Phone Link: {href}"
-    elif href.startswith('javascript:'):
-        return f"Javascript Link: {href}"
-    else:
-        return None
-
 # 내부 링크를 탐색하고 모든 페이지를 제한 없이 순차적으로 크롤링
-def crawl_and_collect_all_pages(base_url, session):
+def crawl_and_collect_all_pages(base_url):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -94,10 +89,10 @@ def crawl_and_collect_all_pages(base_url, session):
             continue  # 이미 방문한 페이지는 재방문하지 않음
 
         st.write(f"Visiting {current_url}...")
-        time.sleep(1)  # 서버에 부담을 주지 않도록 1초 대기, 필요시 조정 가능
+        time.sleep(2)  # 서버에 부담을 주지 않도록 대기 시간 추가
 
-        # 요청이 실패하면 3번 재시도하고 포기
-        text = extract_text_from_url(current_url, session)
+        # 동적 페이지에서 텍스트 추출
+        text = extract_text_from_dynamic_url(current_url)
         if not text:
             continue  # 크롤링에 실패한 경우 데이터를 포함하지 않음
 
@@ -111,12 +106,6 @@ def crawl_and_collect_all_pages(base_url, session):
             for link in soup.find_all('a', href=True):
                 href = link.get('href')
                 full_url = urljoin(base_url, href)
-
-                # 특수 링크 처리 (mailto, tel, javascript)
-                special_link_text = handle_special_links(href)
-                if special_link_text:
-                    all_text += special_link_text + "\n\n" + ("-" * 50) + "\n\n"
-                    continue
 
                 # 광고 및 외부 링크 필터링 후 내부 링크만 크롤링
                 if full_url not in visited and full_url not in to_visit and is_valid_link(full_url, base_url):
@@ -137,7 +126,7 @@ def save_text_to_pdf(text, pdf_filename):
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # 유니코드 지원 폰트 추가 (GitHub에서 폰트 파일을 찾을 수 있도록 상대 경로로 설정)
+    # 유니코드 지원 폰트 추가
     font_path = os.path.join(os.getcwd(), 'fonts', 'NotoSans-Regular.ttf')
     pdf.add_font('NotoSans', '', font_path, uni=True)
     pdf.set_font('NotoSans', size=12)
@@ -152,11 +141,8 @@ def save_text_to_pdf(text, pdf_filename):
 def create_pdf_from_site(base_url, pdf_filename):
     st.write(f"Starting site crawl from {base_url}...")
 
-    # 세션을 사용하여 모든 페이지를 크롤링
-    session = requests.Session()  # 세션을 사용하여 자동으로 쿠키 유지
-
     # 모든 페이지 방문 및 크롤링
-    all_text = crawl_and_collect_all_pages(base_url, session)
+    all_text = crawl_and_collect_all_pages(base_url)
 
     # 텍스트를 PDF로 저장
     if all_text:
@@ -176,7 +162,7 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Website Crawler with Automatic Cookie Handling")
+    st.title("Advanced Website Crawler with Dynamic Content Support")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
