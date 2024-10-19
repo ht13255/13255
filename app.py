@@ -6,16 +6,29 @@ import streamlit as st
 import os
 import time
 
+# 요청을 재시도하는 함수 (최대 3회)
+def make_request_with_retry(session, url, headers, retries=3):
+    for attempt in range(retries):
+        try:
+            response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            st.error(f"Attempt {attempt+1} failed for {url}: {e}")
+            time.sleep(2)  # 2초 대기 후 재시도
+    return None  # 3회 실패 시 None 반환
+
 # 세션을 사용하여 크롤링하는 함수 (타임아웃과 리트라이 횟수 포함)
 def extract_text_from_url(url, session):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
+    response = make_request_with_retry(session, url, headers)
+    if response is None:
+        return ""  # 요청이 실패한 경우 빈 텍스트 반환
+
     try:
-        # 타임아웃 설정을 제거하거나 넉넉히 설정
-        response = session.get(url, headers=headers, timeout=20, allow_redirects=True)
-        response.raise_for_status()  # HTTP 오류가 발생하면 예외 발생
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # 기본적으로 <p> 태그의 텍스트를 모두 가져온다.
@@ -29,9 +42,6 @@ def extract_text_from_url(url, session):
         if divs or spans:
             return "\n\n".join([d.get_text() for d in divs] + [s.get_text() for s in spans])
 
-    except requests.exceptions.RequestException as req_err:
-        st.error(f"Request error occurred while extracting from {url}: {str(req_err)}")
-        return ""
     except Exception as e:
         st.error(f"Error in standard extraction for {url}: {str(e)}")
         return ""
@@ -75,10 +85,11 @@ def crawl_and_collect_all_pages(base_url, session):
         st.write(f"Visiting {current_url}...")
         time.sleep(1)  # 서버에 부담을 주지 않도록 1초 대기, 필요시 조정 가능
 
+        response = make_request_with_retry(session, current_url, headers)
+        if response is None:
+            continue  # 요청 실패 시 다음 링크로 넘어감
+
         try:
-            # 페이지에서 텍스트 크롤링
-            response = session.get(current_url, headers=headers, timeout=20, allow_redirects=True)
-            response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
 
             # 텍스트 추출
@@ -98,9 +109,6 @@ def crawl_and_collect_all_pages(base_url, session):
             # 방문한 페이지로 추가
             visited.add(current_url)
 
-        except requests.exceptions.RequestException as req_err:
-            st.error(f"Request error occurred while accessing {current_url}: {str(req_err)}")
-            continue
         except Exception as e:
             st.error(f"Error occurred while crawling {current_url}: {str(e)}")
             continue
