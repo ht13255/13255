@@ -5,33 +5,34 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from fpdf import FPDF
 import streamlit as st
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 
-# Selenium으로 페이지 로드 및 동적 콘텐츠 처리
-def load_dynamic_page(url):
-    options = Options()
-    options.add_argument("--headless")  # GUI 없이 실행
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
+# 요청을 재시도하는 함수 (최대 3회)
+def make_request_with_retry(session, url, headers, retries=3):
+    for attempt in range(retries):
+        try:
+            response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            st.error(f"Attempt {attempt+1} failed for {url}: {e}")
+            time.sleep(2)  # 2초 대기 후 재시도
+    return None  # 3회 실패 시 None 반환
 
-    # ChromeDriver 설치 및 사용
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    driver.get(url)
-    time.sleep(3)  # JavaScript가 로드될 시간을 주기 위해 대기 (필요시 조정 가능)
+# 세션을 사용하여 크롤링하는 함수
+def extract_text_from_url(url, session):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': url,
+    }
 
-    page_source = driver.page_source
-    driver.quit()  # 크롤링 후 드라이버 종료
-    return page_source
+    response = make_request_with_retry(session, url, headers)
+    if response is None:
+        st.warning(f"Failed to crawl {url} after 3 attempts. Skipping...")
+        return ""  # 요청이 실패한 경우 빈 텍스트 반환
 
-# 페이지에서 텍스트를 추출하는 함수 (Selenium으로 동적 로드 처리)
-def extract_text_from_dynamic_url(url):
     try:
-        # 동적 페이지 로딩
-        page_source = load_dynamic_page(url)
-        soup = BeautifulSoup(page_source, 'html.parser')
+        soup = BeautifulSoup(response.text, 'html.parser')
 
         # 기본적으로 <p> 태그의 텍스트를 모두 가져온다.
         paragraphs = soup.find_all('p')
@@ -83,6 +84,8 @@ def crawl_and_collect_all_pages(base_url):
     to_visit = [base_url]
     all_text = ""
 
+    session = requests.Session()  # 세션을 사용하여 쿠키 유지
+
     while to_visit:
         current_url = to_visit.pop(0)  # 큐에서 링크를 가져와 크롤링
         if current_url in visited:
@@ -92,7 +95,7 @@ def crawl_and_collect_all_pages(base_url):
         time.sleep(2)  # 서버에 부담을 주지 않도록 대기 시간 추가
 
         # 동적 페이지에서 텍스트 추출
-        text = extract_text_from_dynamic_url(current_url)
+        text = extract_text_from_url(current_url, session)
         if not text:
             continue  # 크롤링에 실패한 경우 데이터를 포함하지 않음
 
@@ -162,7 +165,7 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Advanced Website Crawler with Dynamic Content Support")
+    st.title("Advanced Website Crawler without Selenium")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
