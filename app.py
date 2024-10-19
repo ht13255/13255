@@ -17,8 +17,8 @@ def extract_text_from_url(url, session):
     
     try:
         # 첫 번째 시도: <p> 태그에서 텍스트 추출
-        response = session.get(url, headers=headers)
-        response.raise_for_status()
+        response = session.get(url, headers=headers, allow_redirects=True)
+        response.raise_for_status()  # 404, 403 등의 HTTP 오류가 발생할 경우 예외 발생
         soup = BeautifulSoup(response.text, 'html.parser')
         paragraphs = soup.find_all('p')
         if paragraphs:
@@ -30,8 +30,12 @@ def extract_text_from_url(url, session):
         if divs or spans:
             return "\n\n".join([d.get_text() for d in divs] + [s.get_text() for s in spans])
 
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f"HTTP error occurred while extracting from {url}: {str(http_err)}")
+        return ""
     except Exception as e:
         st.error(f"Error in standard extraction for {url}: {str(e)}")
+        return ""
 
     # 세 번째 시도: Selenium을 사용하여 동적 페이지에서 텍스트 추출
     try:
@@ -49,13 +53,6 @@ def extract_text_with_selenium(url):
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
         driver.get(url)
-        
-        # 쿠키를 자동으로 받아 처리
-        driver.add_cookie({
-            'name': 'your_cookie_name',
-            'value': 'your_cookie_value',
-            'domain': 'your_website.com'
-        })
 
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
@@ -81,8 +78,8 @@ def crawl_all_links(base_url, current_url, visited, session):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        response = session.get(current_url, headers=headers)
-        response.raise_for_status()
+        response = session.get(current_url, headers=headers, allow_redirects=True)
+        response.raise_for_status()  # 404, 403 등의 HTTP 오류가 발생할 경우 예외 발생
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # 현재 페이지에서 내부 링크를 추출
@@ -108,6 +105,9 @@ def crawl_all_links(base_url, current_url, visited, session):
                 text += crawl_all_links(base_url, link, visited, session)
 
         return text
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f"HTTP error occurred while crawling {current_url}: {str(http_err)}")
+        return ""
     except Exception as e:
         st.error(f"Error occurred while crawling {current_url}: {str(e)}")
         return ""
@@ -148,7 +148,7 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Full Website to PDF Converter (with Cookie Handling)")
+    st.title("Full Website to PDF Converter (with Error Handling)")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
@@ -170,3 +170,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
