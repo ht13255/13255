@@ -36,6 +36,25 @@ def extract_text_from_url(url, session):
         st.error(f"Error in standard extraction for {url}: {str(e)}")
         return ""
 
+# 광고 링크 및 외부 링크 필터링
+def is_valid_link(href, base_url):
+    # 광고 링크 패턴 정의 (여기에 패턴을 추가할 수 있음)
+    ad_keywords = ['utm_source', 'affiliate', 'ad', 'advert', 'click']
+    
+    # 광고 링크 패턴에 맞는지 확인
+    if any(keyword in href for keyword in ad_keywords):
+        return False
+
+    # 외부 사이트 링크인지 확인
+    parsed_href = urlparse(href)
+    base_domain = urlparse(base_url).netloc
+    
+    # 내부 링크만 허용 (기본 도메인과 동일한 링크만 허용)
+    if parsed_href.netloc and parsed_href.netloc != base_domain:
+        return False
+
+    return True
+
 # 내부 링크를 탐색하고 모든 페이지를 제한 없이 순차적으로 크롤링
 def crawl_and_collect_all_pages(base_url, session):
     headers = {
@@ -67,13 +86,13 @@ def crawl_and_collect_all_pages(base_url, session):
             if text:
                 all_text += text + "\n\n" + ("-" * 50) + "\n\n"
 
-            # 내부 링크 추출
+            # 내부 링크 추출 및 필터링
             for link in soup.find_all('a', href=True):
                 href = link.get('href')
                 full_url = urljoin(base_url, href)
 
-                # 내부 링크 및 외부 링크 필터링 없이 모두 방문
-                if full_url not in visited and full_url not in to_visit:
+                # 광고 및 외부 링크 필터링
+                if full_url not in visited and full_url not in to_visit and is_valid_link(full_url, base_url):
                     to_visit.append(full_url)
 
             # 방문한 페이지로 추가
@@ -124,7 +143,7 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Unlimited Website Crawler to PDF Converter")
+    st.title("Filtered Website Crawler to PDF Converter")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
