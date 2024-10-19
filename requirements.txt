@@ -1,8 +1,6 @@
 streamlit
-requests
 beautifulsoup4
-fpdf
+requests
 selenium
 webdriver-manager
 pdfkit
-wkhtmltopdf
