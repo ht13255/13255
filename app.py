@@ -5,6 +5,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import streamlit as st
 import time
+import pdfkit
 
 # Selenium을 사용해 동적 페이지 처리 (필요시 사용)
 def fetch_dynamic_page(url):
@@ -51,11 +52,14 @@ def crawl_news_page(news_url):
     
     return {'title': title, 'content': content}
 
-# Streamlit 웹 인터페이스에서 사용할 크롤링 함수
+# Streamlit 웹 인터페이스에서 사용할 크롤링 함수 및 PDF 생성 기능
 def crawl_all_pages(main_page_url):
     base_url = main_page_url.rsplit('/', 1)[0]  # 기본 사이트 URL 추출 (상대 링크 처리용)
     current_page_url = main_page_url
     
+    news_articles = []  # 뉴스 기사를 저장할 리스트
+    html_content = "<html><head><meta charset='UTF-8'></head><body>"  # PDF를 위한 HTML 시작
+
     while current_page_url:
         # 현재 페이지에서 뉴스 링크 추출
         response = requests.get(current_page_url)
@@ -71,6 +75,12 @@ def crawl_all_pages(main_page_url):
             st.write(f"### {news_data['title']}")
             st.write(news_data['content'])
             st.write("\n" + "="*50 + "\n")
+            
+            # PDF용 HTML 내용 추가
+            html_content += f"<h2>{news_data['title']}</h2><p>{news_data['content']}</p><hr>"
+
+            # 뉴스 기사를 리스트에 저장
+            news_articles.append(news_data)
         
         # 다음 페이지 링크 추출
         next_page_link = get_next_page_link(soup)
@@ -80,9 +90,16 @@ def crawl_all_pages(main_page_url):
             # 더 이상 페이지가 없으면 종료
             current_page_url = None
 
+    html_content += "</body></html>"  # PDF를 위한 HTML 종료
+    return html_content
+
+# PDF 저장 함수
+def save_as_pdf(html_content, output_filename):
+    pdfkit.from_string(html_content, output_filename)
+
 # Streamlit 앱 실행 부분
 def main():
-    st.title("뉴스 크롤러")
+    st.title("뉴스 크롤러 및 PDF 생성기")
     st.write("뉴스 사이트의 URL을 입력하고, '크롤링 시작' 버튼을 누르세요.")
     
     # 사용자가 입력할 수 있는 텍스트 입력 필드
@@ -90,7 +107,21 @@ def main():
     
     if st.button('크롤링 시작'):
         st.write(f"크롤링을 시작합니다: {url}")
-        crawl_all_pages(url)
+        html_content = crawl_all_pages(url)
+        
+        # 크롤링 완료 후 PDF 생성
+        pdf_filename = 'news_report.pdf'
+        save_as_pdf(html_content, pdf_filename)
+        st.success(f"PDF 파일이 생성되었습니다: {pdf_filename}")
+        
+        # Streamlit에서 PDF 다운로드 링크 제공
+        with open(pdf_filename, "rb") as file:
+            btn = st.download_button(
+                label="PDF 다운로드",
+                data=file,
+                file_name=pdf_filename,
+                mime="application/pdf"
+            )
 
 if __name__ == "__main__":
     main()
