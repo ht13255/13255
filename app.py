@@ -72,19 +72,15 @@ def is_valid_link(href, base_url):
 
     return True
 
-# 내부 링크를 탐색하고 모든 페이지를 제한 없이 순차적으로 크롤링
-def crawl_and_collect_all_pages(base_url):
+# 내부 링크를 탐색하고 모든 페이지를 순차적으로 크롤링 (재귀적으로 탐색)
+def crawl_and_collect_all_pages(base_url, session, visited):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
-    # 방문한 페이지를 추적
-    visited = set()
-    # 크롤링할 페이지 목록
-    to_visit = [base_url]
     all_text = ""
 
-    session = requests.Session()  # 세션을 사용하여 쿠키 유지
+    to_visit = [base_url]
 
     while to_visit:
         current_url = to_visit.pop(0)  # 큐에서 링크를 가져와 크롤링
@@ -94,7 +90,7 @@ def crawl_and_collect_all_pages(base_url):
         st.write(f"Visiting {current_url}...")
         time.sleep(2)  # 서버에 부담을 주지 않도록 대기 시간 추가
 
-        # 동적 페이지에서 텍스트 추출
+        # 페이지에서 텍스트 추출
         text = extract_text_from_url(current_url, session)
         if not text:
             continue  # 크롤링에 실패한 경우 데이터를 포함하지 않음
@@ -111,7 +107,7 @@ def crawl_and_collect_all_pages(base_url):
                 full_url = urljoin(base_url, href)
 
                 # 광고 및 외부 링크 필터링 후 내부 링크만 크롤링
-                if full_url not in visited and full_url not in to_visit and is_valid_link(full_url, base_url):
+                if full_url not in visited and is_valid_link(full_url, base_url):
                     to_visit.append(full_url)
 
             # 방문한 페이지로 추가
@@ -144,8 +140,14 @@ def save_text_to_pdf(text, pdf_filename):
 def create_pdf_from_site(base_url, pdf_filename):
     st.write(f"Starting site crawl from {base_url}...")
 
+    # 세션을 사용하여 모든 페이지를 크롤링
+    session = requests.Session()  # 세션을 사용하여 쿠키 유지
+
+    # 방문한 페이지 추적
+    visited = set()
+
     # 모든 페이지 방문 및 크롤링
-    all_text = crawl_and_collect_all_pages(base_url)
+    all_text = crawl_and_collect_all_pages(base_url, session, visited)
 
     # 텍스트를 PDF로 저장
     if all_text:
@@ -165,7 +167,7 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Advanced Website Crawler without Selenium")
+    st.title("Deep Website Crawler: All Links Explorer")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
