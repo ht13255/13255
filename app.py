@@ -108,10 +108,15 @@ def extract_text_from_url(url):
         logging.error(error_message)  # 오류를 로그 파일에 기록
         return ""
 
-# 내부 링크 및 이미지 추출 함수 (이미지 캐시 추가)
-def extract_internal_links_and_images(url, base_url, depth=1, images_folder="images", downloaded_images=None):
+# 내부 링크 및 이미지 추출 함수 (재귀적 크롤링)
+def extract_internal_links_and_images(url, base_url, depth, visited_urls, images_folder="images", downloaded_images=None):
     if downloaded_images is None:
         downloaded_images = {}
+
+    # 방문한 URL을 저장하여 중복 크롤링 방지
+    if url in visited_urls:
+        return [], []
+    visited_urls.add(url)
 
     try:
         response = requests.get(url)
@@ -135,6 +140,13 @@ def extract_internal_links_and_images(url, base_url, depth=1, images_folder="ima
             if img_url not in images:
                 images.append(img_url)
                 download_image(img_url, images_folder, downloaded_images)  # 이미지 다운로드
+
+        # 깊이 설정에 따른 재귀 탐색
+        if depth > 1:
+            for link in internal_links:
+                new_links, new_images = extract_internal_links_and_images(link, base_url, depth - 1, visited_urls, images_folder, downloaded_images)
+                internal_links.extend(new_links)
+                images.extend(new_images)
 
         return list(set(internal_links)), images  # 중복 제거
     except Exception as e:
@@ -170,13 +182,16 @@ def save_text_and_images_to_pdf(text, image_paths, pdf_filename):
     # PDF 저장
     pdf.output(pdf_filename)
 
-# 주 함수: 사이트 내 링크를 크롤링하고, 모든 데이터를 PDF로 저장
+# 주 함수: 사이트 내 모든 링크와 글을 크롤링하여 PDF로 저장
 def create_pdf_from_site(base_url, pdf_filename, depth=1):
     st.write(f"Starting extraction from {base_url} with depth {depth}...")
 
-    # 1. 메인 페이지에서 모든 내부 링크와 이미지 추출 (이미지 캐시 추가)
+    # 방문한 URL 추적을 위한 집합
+    visited_urls = set()
+
+    # 1. 메인 페이지에서 모든 내부 링크와 이미지 추출 (재귀적 크롤링)
     downloaded_images = {}
-    all_links, all_images = extract_internal_links_and_images(base_url, base_url, depth, downloaded_images=downloaded_images)
+    all_links, all_images = extract_internal_links_and_images(base_url, base_url, depth, visited_urls, downloaded_images=downloaded_images)
 
     all_text = ""
 
@@ -193,7 +208,7 @@ def create_pdf_from_site(base_url, pdf_filename, depth=1):
 
 # Streamlit UI
 def main():
-    st.title("Website to PDF Converter with Image Support and Screenshot Fallback")
+    st.title("Website to PDF Converter with Recursive Crawling")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
