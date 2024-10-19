@@ -2,3 +2,5 @@ streamlit
 requests
 beautifulsoup4
 fpdf
+selenium
+webdriver-manager
