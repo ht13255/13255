@@ -49,13 +49,15 @@ def extract_text_from_url(url, session):
         st.error(f"Error in extracting text from {url}: {str(e)}")
         return ""
 
-# 광고 링크 및 외부 링크, 비정상적인 링크 필터링
+# 광고, 구독, 결제 링크 등을 필터링하여 크롤링하지 않도록 설정
 def is_valid_link(href, base_url):
-    # 광고 링크 패턴 정의 (여기에 패턴을 추가할 수 있음)
-    ad_keywords = ['utm_source', 'affiliate', 'ad', 'advert', 'click']
+    # 광고 및 결제 관련 링크 패턴 정의
+    ad_keywords = ['utm_source', 'affiliate', 'ad', 'advert', 'click', 'sponsored']
+    subscription_keywords = ['subscribe', 'newsletter']
+    payment_keywords = ['checkout', 'payment', 'cart', 'pricing']
 
-    # 광고 링크 패턴에 맞는지 확인
-    if any(keyword in href for keyword in ad_keywords):
+    # 광고 및 결제 관련 링크 필터링
+    if any(keyword in href for keyword in ad_keywords + subscription_keywords + payment_keywords):
         return False
 
     # 특정 스킴을 가진 링크 필터링 (mailto:, tel:, javascript:)
@@ -72,7 +74,7 @@ def is_valid_link(href, base_url):
 
     return True
 
-# 내부 링크를 탐색하고 모든 페이지를 순차적으로 크롤링 (재귀적으로 탐색)
+# 내부 링크를 탐색하고 모든 페이지를 너비 우선 방식으로 크롤링
 def crawl_and_collect_all_pages(base_url, session, visited):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -106,7 +108,7 @@ def crawl_and_collect_all_pages(base_url, session, visited):
                 href = link.get('href')
                 full_url = urljoin(base_url, href)
 
-                # 광고 및 외부 링크 필터링 후 내부 링크만 크롤링
+                # 광고 및 구독, 결제 링크 필터링 후 내부 링크만 크롤링
                 if full_url not in visited and is_valid_link(full_url, base_url):
                     to_visit.append(full_url)
 
@@ -167,7 +169,7 @@ def create_pdf_from_site(base_url, pdf_filename):
 
 # Streamlit UI
 def main():
-    st.title("Deep Website Crawler: All Links Explorer")
+    st.title("Comprehensive Website Crawler: Excluding Ads, Subscription, and Payment Links")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
