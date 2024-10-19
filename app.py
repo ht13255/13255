@@ -6,11 +6,11 @@ import streamlit as st
 import os
 import time
 
-# 요청을 재시도하는 함수 (최대 3회) + 쿠키 설정
-def make_request_with_retry(session, url, headers, retries=3, cookies=None):
+# 요청을 재시도하는 함수 (최대 3회) + 쿠키 자동 관리
+def make_request_with_retry(session, url, headers, retries=3):
     for attempt in range(retries):
         try:
-            response = session.get(url, headers=headers, cookies=cookies, timeout=30, allow_redirects=True)
+            response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:
@@ -19,14 +19,14 @@ def make_request_with_retry(session, url, headers, retries=3, cookies=None):
     return None  # 3회 실패 시 None 반환
 
 # 세션을 사용하여 크롤링하는 함수 (타임아웃과 리트라이 횟수 포함)
-def extract_text_from_url(url, session, cookies=None):
+def extract_text_from_url(url, session):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
         'Referer': url,
     }
 
-    response = make_request_with_retry(session, url, headers, cookies=cookies)
+    response = make_request_with_retry(session, url, headers)
     if response is None:
         st.warning(f"Failed to crawl {url} after 3 attempts. Skipping...")
         return ""  # 요청이 실패한 경우 빈 텍스트 반환
@@ -77,7 +77,7 @@ def handle_special_links(href):
         return None
 
 # 내부 링크를 탐색하고 모든 페이지를 제한 없이 순차적으로 크롤링
-def crawl_and_collect_all_pages(base_url, session, cookies=None):
+def crawl_and_collect_all_pages(base_url, session):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -97,7 +97,7 @@ def crawl_and_collect_all_pages(base_url, session, cookies=None):
         time.sleep(1)  # 서버에 부담을 주지 않도록 1초 대기, 필요시 조정 가능
 
         # 요청이 실패하면 3번 재시도하고 포기
-        text = extract_text_from_url(current_url, session, cookies=cookies)
+        text = extract_text_from_url(current_url, session)
         if not text:
             continue  # 크롤링에 실패한 경우 데이터를 포함하지 않음
 
@@ -149,14 +149,14 @@ def save_text_to_pdf(text, pdf_filename):
     pdf.output(pdf_filename)
 
 # 주 함수: 사이트 내 모든 링크를 순차적으로 크롤링하고, 모든 데이터를 PDF로 저장
-def create_pdf_from_site(base_url, pdf_filename, cookies=None):
+def create_pdf_from_site(base_url, pdf_filename):
     st.write(f"Starting site crawl from {base_url}...")
 
     # 세션을 사용하여 모든 페이지를 크롤링
-    session = requests.Session()
+    session = requests.Session()  # 세션을 사용하여 자동으로 쿠키 유지
 
     # 모든 페이지 방문 및 크롤링
-    all_text = crawl_and_collect_all_pages(base_url, session, cookies=cookies)
+    all_text = crawl_and_collect_all_pages(base_url, session)
 
     # 텍스트를 PDF로 저장
     if all_text:
@@ -174,41 +174,17 @@ def create_pdf_from_site(base_url, pdf_filename, cookies=None):
     else:
         st.error("No content to save.")
 
-# 쿠키 파일(.txt) 파싱 함수
-def parse_cookie_file(cookie_file):
-    cookies = {}
-    try:
-        lines = cookie_file.read().decode('utf-8').splitlines()
-        for line in lines:
-            if '=' in line:
-                key, value = line.split('=', 1)
-                cookies[key.strip()] = value.strip()
-    except Exception as e:
-        st.error(f"Error parsing cookie file: {e}")
-    return cookies
-
 # Streamlit UI
 def main():
-    st.title("Website Crawler with Cookie Support")
+    st.title("Website Crawler with Automatic Cookie Handling")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
 
-    # 쿠키 파일 업로드 (.txt 파일)
-    cookie_file = st.file_uploader("Upload Cookie File (.txt format)", type=['txt'])
-
-    cookies = None
-    if cookie_file is not None:
-        cookies = parse_cookie_file(cookie_file)
-        if cookies:
-            st.success("Cookies loaded successfully!")
-        else:
-            st.error("Failed to load cookies.")
-
     if st.button("Create PDF"):
         if url_input:
             pdf_filename = "site_output.pdf"
-            create_pdf_from_site(url_input, pdf_filename, cookies=cookies)
+            create_pdf_from_site(url_input, pdf_filename)
         else:
             st.error("Please enter a valid URL")
 
