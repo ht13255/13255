@@ -4,26 +4,51 @@ from urllib.parse import urljoin, urlparse
 from fpdf import FPDF
 import streamlit as st
 import os
-import re
+import logging
 
-# 이미지 다운로드 함수
-def download_image(url, folder):
+# 로그 파일 설정
+logging.basicConfig(filename='error_log.txt', level=logging.ERROR, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# 이미지 확장자 확인 함수
+def is_valid_image_url(url):
+    valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
+    return url.lower().endswith(valid_extensions)
+
+# 이미지 다운로드 함수 (캐시 추가)
+def download_image(url, folder, downloaded_images):
     try:
+        # 이미지 URL이 유효한지 확인
+        if not is_valid_image_url(url):
+            st.warning(f"Skipping invalid image URL: {url}")
+            return None
+
+        # 이미지가 이미 다운로드되었는지 확인
+        if url in downloaded_images:
+            st.write(f"Image already downloaded: {url}")
+            return downloaded_images[url]
+
         if not os.path.exists(folder):
             os.makedirs(folder)
 
         response = requests.get(url)
         response.raise_for_status()
-        
+
         # 이미지 파일 이름 추출
         image_name = os.path.join(folder, url.split("/")[-1])
-        
+
+        # 이미지 저장
         with open(image_name, 'wb') as f:
             f.write(response.content)
 
+        # 캐시에 이미지 경로 저장
+        downloaded_images[url] = image_name
+
         return image_name
     except Exception as e:
-        st.error(f"Error occurred while downloading image {url}: {str(e)}")
+        error_message = f"Error occurred while downloading image {url}: {str(e)}"
+        st.error(error_message)
+        logging.error(error_message)  # 오류를 로그 파일에 기록
         return None
 
 # URL에서 데이터를 가져와 텍스트를 추출하는 함수
@@ -39,16 +64,21 @@ def extract_text_from_url(url):
 
         return text_content
     except Exception as e:
-        st.error(f"Error occurred while extracting from {url}: {str(e)}")
+        error_message = f"Error occurred while extracting text from {url}: {str(e)}"
+        st.error(error_message)
+        logging.error(error_message)  # 오류를 로그 파일에 기록
         return ""
 
-# 내부 링크 및 이미지 추출 함수
-def extract_internal_links_and_images(url, base_url, depth=1, images_folder="images"):
+# 내부 링크 및 이미지 추출 함수 (이미지 캐시 추가)
+def extract_internal_links_and_images(url, base_url, depth=1, images_folder="images", downloaded_images=None):
+    if downloaded_images is None:
+        downloaded_images = {}
+
     try:
         response = requests.get(url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        
+
         internal_links = []
         images = []
 
@@ -65,18 +95,20 @@ def extract_internal_links_and_images(url, base_url, depth=1, images_folder="ima
             img_url = urljoin(base_url, img['src'])
             if img_url not in images:
                 images.append(img_url)
-                download_image(img_url, images_folder)  # 이미지 다운로드
+                download_image(img_url, images_folder, downloaded_images)  # 이미지 다운로드
 
         # 깊이 설정에 따른 재귀 탐색
         if depth > 1:
             for link in internal_links:
-                links_and_images = extract_internal_links_and_images(link, base_url, depth - 1, images_folder)
+                links_and_images = extract_internal_links_and_images(link, base_url, depth - 1, images_folder, downloaded_images)
                 internal_links.extend(links_and_images[0])
                 images.extend(links_and_images[1])
 
         return list(set(internal_links)), images  # 중복 제거
     except Exception as e:
-        st.error(f"Error occurred while extracting links and images from {url}: {str(e)}")
+        error_message = f"Error occurred while extracting links and images from {url}: {str(e)}"
+        st.error(error_message)
+        logging.error(error_message)  # 오류를 로그 파일에 기록
         return [], []
 
 # PDF로 텍스트 저장 함수 (유니코드 지원)
@@ -100,11 +132,12 @@ def save_text_to_pdf(text, pdf_filename):
 def create_pdf_from_site(base_url, pdf_filename, depth=1):
     st.write(f"Starting extraction from {base_url} with depth {depth}...")
 
-    # 1. 메인 페이지에서 모든 내부 링크와 이미지 추출
-    all_links, all_images = extract_internal_links_and_images(base_url, base_url, depth)
+    # 1. 메인 페이지에서 모든 내부 링크와 이미지 추출 (이미지 캐시 추가)
+    downloaded_images = {}
+    all_links, all_images = extract_internal_links_and_images(base_url, base_url, depth, downloaded_images=downloaded_images)
 
     all_text = ""
-    
+
     # 2. 각 링크에서 텍스트 추출
     for link in all_links:
         st.write(f"Extracting from {link}...")
@@ -118,7 +151,7 @@ def create_pdf_from_site(base_url, pdf_filename, depth=1):
 
 # Streamlit UI
 def main():
-    st.title("Website to PDF Converter with Image Support")
+    st.title("Website to PDF Converter with Image Support and Logging")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
