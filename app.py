@@ -26,6 +26,7 @@ def extract_text_from_url(url, session):
 
     response = make_request_with_retry(session, url, headers)
     if response is None:
+        st.warning(f"Failed to crawl {url} after 3 attempts. Skipping...")
         return ""  # 요청이 실패한 경우 빈 텍스트 반환
 
     try:
@@ -93,18 +94,16 @@ def crawl_and_collect_all_pages(base_url, session):
         st.write(f"Visiting {current_url}...")
         time.sleep(1)  # 서버에 부담을 주지 않도록 1초 대기, 필요시 조정 가능
 
-        # 요청이 실패하면 다음 링크로 넘어가기
-        response = make_request_with_retry(session, current_url, headers)
-        if response is None:
-            continue  # 요청 실패 시 다음 링크로 넘어감
+        # 요청이 실패하면 3번 재시도하고 포기
+        text = extract_text_from_url(current_url, session)
+        if not text:
+            continue  # 크롤링에 실패한 경우 데이터를 포함하지 않음
+
+        # 크롤링 성공 시 텍스트 추가
+        all_text += text + "\n\n" + ("-" * 50) + "\n\n"
 
         try:
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # 텍스트 추출
-            text = extract_text_from_url(current_url, session)
-            if text:
-                all_text += text + "\n\n" + ("-" * 50) + "\n\n"
+            soup = BeautifulSoup(text, 'html.parser')
 
             # 내부 링크 추출 및 처리
             for link in soup.find_all('a', href=True):
@@ -160,7 +159,6 @@ def create_pdf_from_site(base_url, pdf_filename):
     # 텍스트를 PDF로 저장
     if all_text:
         save_text_to_pdf(all_text, pdf_filename)
-        st.success(f"PDF saved as {pdf_filename}")
 
         # PDF 다운로드 링크 제공
         with open(pdf_filename, "rb") as pdf_file:
