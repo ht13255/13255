@@ -51,26 +51,27 @@ def is_valid_link(href, base_url):
     # 광고 링크 패턴 정의 (여기에 패턴을 추가할 수 있음)
     ad_keywords = ['utm_source', 'affiliate', 'ad', 'advert', 'click']
 
-    # 필터링할 URL 스킴 (mailto:, tel:, javascript:)
-    invalid_schemes = ['mailto:', 'tel:', 'javascript:']
-    
     # 광고 링크 패턴에 맞는지 확인
     if any(keyword in href for keyword in ad_keywords):
         return False
 
-    # 특정 스킴을 가진 링크 필터링
+    # 특정 스킴을 가진 링크 필터링 (mailto:, tel:, javascript:)
+    invalid_schemes = ['mailto:', 'tel:', 'javascript:']
     if any(href.startswith(scheme) for scheme in invalid_schemes):
         return False
 
-    # 외부 사이트 링크인지 확인
-    parsed_href = urlparse(href)
-    base_domain = urlparse(base_url).netloc
-    
-    # 내부 링크만 허용 (기본 도메인과 동일한 링크만 허용)
-    if parsed_href.netloc and parsed_href.netloc != base_domain:
-        return False
-
     return True
+
+# 특수 링크 처리 (mailto, tel, javascript)
+def handle_special_links(href):
+    if href.startswith('mailto:'):
+        return f"Email Link: {href}"
+    elif href.startswith('tel:'):
+        return f"Phone Link: {href}"
+    elif href.startswith('javascript:'):
+        return f"Javascript Link: {href}"
+    else:
+        return None
 
 # 내부 링크를 탐색하고 모든 페이지를 제한 없이 순차적으로 크롤링
 def crawl_and_collect_all_pages(base_url, session):
@@ -92,6 +93,7 @@ def crawl_and_collect_all_pages(base_url, session):
         st.write(f"Visiting {current_url}...")
         time.sleep(1)  # 서버에 부담을 주지 않도록 1초 대기, 필요시 조정 가능
 
+        # 요청이 실패하면 다음 링크로 넘어가기
         response = make_request_with_retry(session, current_url, headers)
         if response is None:
             continue  # 요청 실패 시 다음 링크로 넘어감
@@ -104,12 +106,18 @@ def crawl_and_collect_all_pages(base_url, session):
             if text:
                 all_text += text + "\n\n" + ("-" * 50) + "\n\n"
 
-            # 내부 링크 추출 및 필터링
+            # 내부 링크 추출 및 처리
             for link in soup.find_all('a', href=True):
                 href = link.get('href')
                 full_url = urljoin(base_url, href)
 
-                # 광고 및 외부 링크, 비정상 링크 필터링
+                # 특수 링크 처리 (mailto, tel, javascript)
+                special_link_text = handle_special_links(href)
+                if special_link_text:
+                    all_text += special_link_text + "\n\n" + ("-" * 50) + "\n\n"
+                    continue
+
+                # 광고 및 외부 링크 필터링 후 내부 링크만 크롤링
                 if full_url not in visited and full_url not in to_visit and is_valid_link(full_url, base_url):
                     to_visit.append(full_url)
 
@@ -153,12 +161,22 @@ def create_pdf_from_site(base_url, pdf_filename):
     if all_text:
         save_text_to_pdf(all_text, pdf_filename)
         st.success(f"PDF saved as {pdf_filename}")
+
+        # PDF 다운로드 링크 제공
+        with open(pdf_filename, "rb") as pdf_file:
+            pdf_data = pdf_file.read()
+            st.download_button(
+                label="Download PDF",
+                data=pdf_data,
+                file_name=pdf_filename,
+                mime="application/pdf"
+            )
     else:
         st.error("No content to save.")
 
 # Streamlit UI
 def main():
-    st.title("Filtered Website Crawler to PDF Converter")
+    st.title("Special Link Handling Website Crawler to PDF Converter")
 
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
@@ -167,14 +185,6 @@ def main():
         if url_input:
             pdf_filename = "site_output.pdf"
             create_pdf_from_site(url_input, pdf_filename)
-            # PDF 다운로드 링크 제공
-            with open(pdf_filename, "rb") as pdf_file:
-                st.download_button(
-                    label="Download PDF",
-                    data=pdf_file,
-                    file_name=pdf_filename,
-                    mime="application/pdf"
-                )
         else:
             st.error("Please enter a valid URL")
 
