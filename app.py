@@ -5,7 +5,6 @@ from fpdf import FPDF
 import streamlit as st
 import os
 import time
-import json
 
 # 요청을 재시도하는 함수 (최대 3회) + 쿠키 설정
 def make_request_with_retry(session, url, headers, retries=3, cookies=None):
@@ -175,6 +174,19 @@ def create_pdf_from_site(base_url, pdf_filename, cookies=None):
     else:
         st.error("No content to save.")
 
+# 쿠키 파일(.txt) 파싱 함수
+def parse_cookie_file(cookie_file):
+    cookies = {}
+    try:
+        lines = cookie_file.read().decode('utf-8').splitlines()
+        for line in lines:
+            if '=' in line:
+                key, value = line.split('=', 1)
+                cookies[key.strip()] = value.strip()
+    except Exception as e:
+        st.error(f"Error parsing cookie file: {e}")
+    return cookies
+
 # Streamlit UI
 def main():
     st.title("Website Crawler with Cookie Support")
@@ -182,17 +194,16 @@ def main():
     # URL 입력
     url_input = st.text_input("Enter the base URL:")
 
-    # 쿠키 파일 업로드
-    cookie_file = st.file_uploader("Upload Cookie File (JSON format)", type=['json'])
+    # 쿠키 파일 업로드 (.txt 파일)
+    cookie_file = st.file_uploader("Upload Cookie File (.txt format)", type=['txt'])
 
     cookies = None
     if cookie_file is not None:
-        try:
-            # 쿠키 파일을 읽고 JSON 파싱
-            cookies = json.load(cookie_file)
+        cookies = parse_cookie_file(cookie_file)
+        if cookies:
             st.success("Cookies loaded successfully!")
-        except Exception as e:
-            st.error(f"Error loading cookie file: {e}")
+        else:
+            st.error("Failed to load cookies.")
 
     if st.button("Create PDF"):
         if url_input:
