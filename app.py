@@ -6,6 +6,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 import streamlit as st
 import time
 import pdfkit
+from config import get_pdfkit_config  # wkhtmltopdf 경로 설정
 
 # Selenium을 사용해 동적 페이지 처리 (필요시 사용)
 def fetch_dynamic_page(url):
@@ -95,7 +96,8 @@ def crawl_all_pages(main_page_url):
 
 # PDF 저장 함수
 def save_as_pdf(html_content, output_filename):
-    pdfkit.from_string(html_content, output_filename)
+    config = get_pdfkit_config()
+    pdfkit.from_string(html_content, output_filename, configuration=config)
 
 # Streamlit 앱 실행 부분
 def main():
