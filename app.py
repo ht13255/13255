@@ -6,6 +6,7 @@ import streamlit as st
 import os
 import logging
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from selenium import webdriver
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -18,17 +19,24 @@ def is_valid_image_url(url):
     valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
     return url.lower().endswith(valid_extensions)
 
-# 이미지 다운로드 함수 (캐시 추가 및 차단된 이미지 처리)
-def download_image(url, folder, downloaded_images):
+# webp 이미지를 JPG 또는 PNG로 변환하는 함수
+def convert_webp_to_png(image_path):
     try:
-        # 이미지 URL이 유효한지 확인
+        img = Image.open(image_path)
+        png_path = image_path.replace('.webp', '.png')
+        img.save(png_path, 'PNG')  # PNG 형식으로 변환하여 저장
+        return png_path
+    except Exception as e:
+        logging.error(f"Failed to convert webp to PNG: {str(e)}")
+        return None
+
+# 이미지 다운로드 함수 (webp 변환 포함)
+def download_image(url, folder, downloaded_images, progress_bar, task_num, total_tasks):
+    try:
         if not is_valid_image_url(url):
-            st.warning(f"Skipping invalid image URL: {url}")
             return None
 
-        # 이미지가 이미 다운로드되었는지 확인
         if url in downloaded_images:
-            st.write(f"Image already downloaded: {url}")
             return downloaded_images[url]
 
         if not os.path.exists(folder):
@@ -36,13 +44,12 @@ def download_image(url, folder, downloaded_images):
 
         # 기본 헤더로 이미지 다운로드 시도
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
         except requests.exceptions.RequestException:
-            # 기본 요청 실패 시 사용자 에이전트를 추가한 헤더로 재시도
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
 
         # 이미지 파일 이름 추출
@@ -52,16 +59,21 @@ def download_image(url, folder, downloaded_images):
         with open(image_name, 'wb') as f:
             f.write(response.content)
 
+        # webp 이미지 처리: webp를 PNG로 변환
+        if image_name.lower().endswith('.webp'):
+            image_name = convert_webp_to_png(image_name)
+
         # 캐시에 이미지 경로 저장
         downloaded_images[url] = image_name
+
+        # 진행상황 업데이트
+        progress_bar.progress((task_num + 1) / total_tasks)
 
         return image_name
 
     except Exception as e:
-        # 이미지 다운로드에 실패할 경우 Selenium으로 스크린샷을 찍어서 저장
-        st.error(f"Error downloading image {url}. Attempting screenshot instead.")
         logging.error(f"Error downloading image {url}: {str(e)}")
-        return capture_screenshot(url, folder)
+        return None
 
 # Selenium을 사용해 스크린샷을 캡처하는 함수
 def capture_screenshot(url, folder):
@@ -69,7 +81,6 @@ def capture_screenshot(url, folder):
         if not os.path.exists(folder):
             os.makedirs(folder)
 
-        # Selenium WebDriver 설정
         options = webdriver.ChromeOptions()
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
@@ -78,81 +89,73 @@ def capture_screenshot(url, folder):
         driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
         driver.get(url)
 
-        # 스크린샷 파일 경로 설정
         screenshot_name = os.path.join(folder, f"screenshot_{urlparse(url).netloc}.png")
         driver.save_screenshot(screenshot_name)
         driver.quit()
 
         return screenshot_name
     except Exception as e:
-        error_message = f"Failed to capture screenshot for {url}: {str(e)}"
-        st.error(error_message)
-        logging.error(error_message)
+        logging.error(f"Failed to capture screenshot for {url}: {str(e)}")
         return None
 
 # URL에서 데이터를 가져와 텍스트를 추출하는 함수
-def extract_text_from_url(url):
+def extract_text_from_url(url, progress_bar, task_num, total_tasks):
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # 요청 오류가 있으면 예외 발생
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # 기본적으로 <p> 태그의 텍스트를 모두 가져온다.
         paragraphs = soup.find_all('p')
         text_content = "\n\n".join([p.get_text() for p in paragraphs])
 
+        # 진행상황 업데이트
+        progress_bar.progress((task_num + 1) / total_tasks)
+
         return text_content
     except Exception as e:
-        error_message = f"Error occurred while extracting text from {url}: {str(e)}"
-        st.error(error_message)
-        logging.error(error_message)  # 오류를 로그 파일에 기록
+        logging.error(f"Error extracting text from {url}: {str(e)}")
         return ""
 
-# 내부 링크 및 이미지 추출 함수 (재귀적 크롤링)
+# 내부 링크 및 이미지 추출 함수
 def extract_internal_links_and_images(url, base_url, depth, visited_urls, images_folder="images", downloaded_images=None):
     if downloaded_images is None:
         downloaded_images = {}
 
-    # 방문한 URL을 저장하여 중복 크롤링 방지
     if url in visited_urls:
         return [], []
+
     visited_urls.add(url)
 
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
         internal_links = []
         images = []
 
-        # 모든 <a> 태그에서 내부 링크 추출
         for link in soup.find_all('a', href=True):
             href = link.get('href')
             full_url = urljoin(base_url, href)
-            if urlparse(full_url).netloc == urlparse(base_url).netloc:
-                if full_url not in internal_links:
-                    internal_links.append(full_url)
+            if urlparse(full_url).netloc == urlparse(base_url).netloc and full_url not in visited_urls:
+                internal_links.append(full_url)
 
-        # 모든 <img> 태그에서 이미지 URL 추출
         for img in soup.find_all('img', src=True):
             img_url = urljoin(base_url, img['src'])
             if img_url not in images:
                 images.append(img_url)
-                download_image(img_url, images_folder, downloaded_images)  # 이미지 다운로드
 
-        # 깊이 설정에 따른 재귀 탐색
         if depth > 1:
-            for link in internal_links:
-                new_links, new_images = extract_internal_links_and_images(link, base_url, depth - 1, visited_urls, images_folder, downloaded_images)
-                internal_links.extend(new_links)
-                images.extend(new_images)
+            with ThreadPoolExecutor() as executor:
+                futures = [executor.submit(extract_internal_links_and_images, link, base_url, depth - 1, visited_urls, images_folder, downloaded_images) for link in internal_links]
+                for future in as_completed(futures):
+                    new_links, new_images = future.result()
+                    internal_links.extend(new_links)
+                    images.extend(new_images)
 
-        return list(set(internal_links)), images  # 중복 제거
+        return list(set(internal_links)), images
     except Exception as e:
-        error_message = f"Error occurred while extracting links and images from {url}: {str(e)}"
-        st.error(error_message)
-        logging.error(error_message)  # 오류를 로그 파일에 기록
+        logging.error(f"Error extracting links and images from {url}: {str(e)}")
         return [], []
 
 # PDF로 텍스트와 이미지를 저장하는 함수
@@ -161,56 +164,65 @@ def save_text_and_images_to_pdf(text, image_paths, pdf_filename):
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # 유니코드 지원 폰트 추가
     font_path = os.path.join(os.getcwd(), 'fonts', 'NotoSans-Regular.ttf')
     pdf.add_font('NotoSans', '', font_path, uni=True)
     pdf.set_font('NotoSans', size=12)
 
-    # 텍스트를 PDF로 작성
     pdf.multi_cell(0, 10, text)
 
-    # 이미지를 PDF에 추가
     for image_path in image_paths:
         try:
             pdf.add_page()
-            pdf.image(image_path, x=10, y=10, w=pdf.w - 20)  # 이미지 크기 조정
+            pdf.image(image_path, x=10, y=10, w=pdf.w - 20)
         except Exception as e:
-            error_message = f"Failed to add image {image_path} to PDF: {str(e)}"
-            st.error(error_message)
-            logging.error(error_message)
+            logging.error(f"Failed to add image {image_path} to PDF: {str(e)}")
 
-    # PDF 저장
     pdf.output(pdf_filename)
 
 # 주 함수: 사이트 내 모든 링크와 글을 크롤링하여 PDF로 저장
 def create_pdf_from_site(base_url, pdf_filename, depth=1):
     st.write(f"Starting extraction from {base_url} with depth {depth}...")
 
-    # 방문한 URL 추적을 위한 집합
     visited_urls = set()
-
-    # 1. 메인 페이지에서 모든 내부 링크와 이미지 추출 (재귀적 크롤링)
     downloaded_images = {}
+
     all_links, all_images = extract_internal_links_and_images(base_url, base_url, depth, visited_urls, downloaded_images=downloaded_images)
 
     all_text = ""
 
-    # 2. 각 링크에서 텍스트 추출
-    for link in all_links:
-        st.write(f"Extracting from {link}...")
-        text = extract_text_from_url(link)
-        if text:
-            all_text += text + "\n\n" + ("-" * 50) + "\n\n"
+    total_tasks = len(all_links) + len(all_images)
+    progress_bar = st.progress(0)  # 진행상황 바 생성
 
-    # 3. 텍스트와 이미지를 PDF로 저장
-    save_text_and_images_to_pdf(all_text, list(downloaded_images.values()), pdf_filename)
+    with ThreadPoolExecutor() as executor:
+        text_futures = {executor.submit(extract_text_from_url, link, progress_bar, i, total_tasks): link for i, link in enumerate(all_links)}
+        image_futures = {executor.submit(download_image, img, "images", downloaded_images, progress_bar, len(all_links) + i, total_tasks): img for i, img in enumerate(all_images)}
+
+        for future in as_completed(text_futures):
+            link = text_futures[future]
+            try:
+                text = future.result()
+                if text:
+                    all_text += text + "\n\n" + ("-" * 50) + "\n\n"
+            except Exception as e:
+                logging.error(f"Error extracting text from {link}: {str(e)}")
+
+        image_paths = []
+        for future in as_completed(image_futures):
+            img = image_futures[future]
+            try:
+                image_path = future.result()
+                if image_path:
+                    image_paths.append(image_path)
+            except Exception as e:
+                logging.error(f"Error downloading image {img}: {str(e)}")
+
+    save_text_and_images_to_pdf(all_text, image_paths, pdf_filename)
     st.success(f"PDF saved as {pdf_filename}")
 
 # Streamlit UI
 def main():
-    st.title("Website to PDF Converter with Recursive Crawling")
+    st.title("Website to PDF Converter with Progress Indicator")
 
-    # URL 입력
     url_input = st.text_input("Enter the base URL:")
     depth = st.slider("Select the depth for crawling:", min_value=1, max_value=5, value=1)
 
@@ -218,7 +230,6 @@ def main():
         if url_input:
             pdf_filename = "site_output.pdf"
             create_pdf_from_site(url_input, pdf_filename, depth)
-            # PDF 다운로드 링크 제공
             with open(pdf_filename, "rb") as pdf_file:
                 st.download_button(
                     label="Download PDF",
