@@ -1,9 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+import streamlit as st
 import time
 
 # Selenium을 사용해 동적 페이지 처리 (필요시 사용)
@@ -51,11 +51,9 @@ def crawl_news_page(news_url):
     
     return {'title': title, 'content': content}
 
-# 전체 크롤링 프로세스 (여러 페이지 크롤링)
-def main():
-    base_url = 'https://example.com'  # 기본 사이트 URL
-    main_page_url = f'{base_url}/news'  # 뉴스 목록 첫 페이지 URL
-    
+# Streamlit 웹 인터페이스에서 사용할 크롤링 함수
+def crawl_all_pages(main_page_url):
+    base_url = main_page_url.rsplit('/', 1)[0]  # 기본 사이트 URL 추출 (상대 링크 처리용)
     current_page_url = main_page_url
     
     while current_page_url:
@@ -68,9 +66,11 @@ def main():
         for news_link in news_links:
             full_url = f"{base_url}{news_link}"  # 상대 경로일 경우 절대 경로로 변환
             news_data = crawl_news_page(full_url)
-            print(news_data['title'])
-            print(news_data['content'])
-            print("\n" + "="*50 + "\n")
+            
+            # Streamlit으로 출력
+            st.write(f"### {news_data['title']}")
+            st.write(news_data['content'])
+            st.write("\n" + "="*50 + "\n")
         
         # 다음 페이지 링크 추출
         next_page_link = get_next_page_link(soup)
@@ -79,6 +79,18 @@ def main():
         else:
             # 더 이상 페이지가 없으면 종료
             current_page_url = None
+
+# Streamlit 앱 실행 부분
+def main():
+    st.title("뉴스 크롤러")
+    st.write("뉴스 사이트의 URL을 입력하고, '크롤링 시작' 버튼을 누르세요.")
+    
+    # 사용자가 입력할 수 있는 텍스트 입력 필드
+    url = st.text_input('뉴스 목록 페이지 URL을 입력하세요', 'https://example.com/news')
+    
+    if st.button('크롤링 시작'):
+        st.write(f"크롤링을 시작합니다: {url}")
+        crawl_all_pages(url)
 
 if __name__ == "__main__":
     main()
